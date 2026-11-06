@@ -15,17 +15,23 @@ function To-Plain($s) { [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runt
 
 function Get-Token {
     if (Test-Path $tokenFile) {
-        try { return To-Plain (Get-Content $tokenFile -Raw | ConvertTo-SecureString) } catch { }
+        try {
+            $enc = (Get-Content $tokenFile -Raw).Trim()   # 파일 끝 줄바꿈 때문에 복호화가 실패하던 문제 수정
+            return To-Plain ($enc | ConvertTo-SecureString)
+        } catch {
+            Write-Host ("저장된 토큰을 읽지 못했습니다: {0}" -f $_.Exception.Message)
+        }
     }
     Write-Host ''
-    Write-Host '처음 한 번만 필요합니다.'
-    Write-Host '예약 작업 화면에서 만든 API 토큰(sk-ant-oat01- 로 시작)을 붙여 넣고 Enter를 누르세요.'
+    Write-Host '토큰이 필요합니다(처음 한 번, 또는 토큰을 새로 만든 뒤).'
+    Write-Host '예약 작업 화면의 API 트리거 토큰(sk-ant-oat01- 로 시작)을 붙여 넣고 Enter를 누르세요.'
     Write-Host '(붙여 넣어도 화면에는 * 로 보입니다. 마우스 오른쪽 클릭으로 붙여 넣기)'
     $s = Read-Host -AsSecureString '토큰'
     $plain = (To-Plain $s).Trim()
     if ($plain -notlike 'sk-ant-oat01-*') { throw '토큰 형식이 아닙니다. sk-ant-oat01- 로 시작하는 값을 넣어 주세요.' }
-    # 이 PC의 이 사용자만 풀 수 있게 암호화해서 저장
-    ($plain | ConvertTo-SecureString -AsPlainText -Force) | ConvertFrom-SecureString | Set-Content $tokenFile
+    # 이 PC의 이 사용자만 풀 수 있게 암호화해서 저장(끝 줄바꿈 없이)
+    $enc = ($plain | ConvertTo-SecureString -AsPlainText -Force) | ConvertFrom-SecureString
+    [IO.File]::WriteAllText($tokenFile, $enc)
     return $plain
 }
 
@@ -45,7 +51,7 @@ try {
              -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec 60
     } catch {
         $code = $null; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
-        if ($code -eq 401) { Remove-Item $tokenFile -ErrorAction SilentlyContinue; throw '토큰이 맞지 않습니다. 다시 실행해서 새 토큰을 넣어 주세요.' }
+        if ($code -eq 401) { Remove-Item $tokenFile -ErrorAction SilentlyContinue; throw '토큰이 맞지 않습니다(작업 화면에서 토큰을 새로 만들면 이전 토큰은 사용할 수 없게 됩니다). 다시 실행해서 현재 토큰을 넣어 주세요.' }
         if ($code -eq 400) { throw '예약 작업이 일시중지 상태입니다. 예약 작업 화면에서 「활성」으로 바꿔 주세요.' }
         if ($code -eq 429) { throw '1시간 실행 한도에 걸렸습니다. 잠시 뒤 다시 실행해 주세요.' }
         throw ("실행 요청 실패 ({0}): {1}" -f $code, $_.Exception.Message)
